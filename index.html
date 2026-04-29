@@ -37,6 +37,7 @@
             margin-bottom: 1rem;
             letter-spacing: 1px;
             text-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+            min-height: 1.5em;
         }
 
         /* メインゲージ */
@@ -81,7 +82,7 @@
             border-radius: 10px; cursor: pointer; backdrop-filter: blur(10px);
         }
         
-        /* 設定パネル（オーバーレイ） */
+        /* 設定パネル */
         #configPanel {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: rgba(5, 5, 8, 0.95); backdrop-filter: blur(5px);
@@ -115,7 +116,7 @@
     </div>
 
     <div class="container" id="ui" style="display: none;">
-        <div id="appTitle">ゆな・かりなのおうちまで</div>
+        <div id="appTitle"></div>
 
         <div class="gauge-outer">
             <div id="bar"></div>
@@ -143,11 +144,11 @@
                 <input type="text" id="inTitle" placeholder="例：ゆな・かりなのおうちまで">
             </div>
             <div class="input-group">
-                <label>LATITUDE (目的地の緯度)</label>
+                <label>LATITUDE (緯度)</label>
                 <input type="number" id="inLat" step="any">
             </div>
             <div class="input-group">
-                <label>LONGITUDE (目的地の経度)</label>
+                <label>LONGITUDE (経度)</label>
                 <input type="number" id="inLon" step="any">
             </div>
             <div class="config-btns">
@@ -169,7 +170,7 @@
         let targetBearing = null; 
         let currentHeading = null; 
         let isGpsActive = false;
-        let wakeLock = null; // スリープ防止用
+        let wakeLock = null;
 
         const elBar = document.getElementById('bar');
         const elDist = document.getElementById('distVal');
@@ -178,7 +179,7 @@
         const elUI = document.getElementById('ui');
         const elTitle = document.getElementById('appTitle');
 
-        // 起動時にローカルストレージから設定を読み込む
+        // ストレージから読み込み
         window.onload = () => {
             const savedTitle = localStorage.getItem('targetTitle');
             const savedLat = localStorage.getItem('targetLat');
@@ -188,11 +189,9 @@
             if (savedLat !== null) CONFIG.lat = parseFloat(savedLat);
             if (savedLon !== null) CONFIG.lon = parseFloat(savedLon);
 
-            // 初期タイトル反映
             elTitle.textContent = CONFIG.title;
         };
 
-        // --- CONFIG UI制御 ---
         function openConfig() {
             document.getElementById('inTitle').value = CONFIG.title;
             document.getElementById('inLat').value = CONFIG.lat;
@@ -214,7 +213,6 @@
                 return;
             }
 
-            // 更新と保存
             CONFIG.title = title;
             CONFIG.lat = lat;
             CONFIG.lon = lon;
@@ -224,29 +222,35 @@
             localStorage.setItem('targetLon', lon);
             
             elTitle.textContent = title;
-            totalDist = null; // 基準距離をリセットして再計算
+            totalDist = null; 
             
             closeConfig();
         }
 
         // --- メインシステム ---
         async function initSystem() {
-            // スリープ防止機能の有効化
-            if ('wakeLock' in navigator) {
+            // 1. 【最優先】コンパスの許可 (iOS対応) 
+            // ユーザー操作直後に実行しないとブロックされるため、最初に行う
+            if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
                 try {
-                    wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('Wake Lock is active!');
+                    const response = await DeviceOrientationEvent.requestPermission();
+                    if (response !== 'granted') {
+                        alert("コンパスの使用を許可してください。");
+                        return;
+                    }
                 } catch (err) {
-                    console.error(`${err.name}, ${err.message}`);
+                    console.error(err);
+                    alert("許可リクエスト中にエラーが発生しました。HTTPS接続を確認してください。");
+                    return;
                 }
             }
 
-            // コンパスの許可 (iOS対応)
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                const response = await DeviceOrientationEvent.requestPermission();
-                if (response !== 'granted') {
-                    alert("コンパスの使用を許可してください。");
-                    return;
+            // 2. スリープ防止機能
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                } catch (err) {
+                    console.error('Wake Lock Error:', err);
                 }
             }
             
@@ -278,7 +282,7 @@
             }, err => {
                 isGpsActive = false;
                 document.body.classList.remove('boosting');
-                elMsg.textContent = "GPS ERROR: " + err.code;
+                elMsg.textContent = "GPS SEARCHING...";
             }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 
             window.addEventListener('deviceorientation', e => {
@@ -322,7 +326,7 @@
             return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
         }
 
-        // タブが切り替わった時にスリープ防止を再要求する
+        // 復帰時にスリープ防止を再適用
         document.addEventListener('visibilitychange', async () => {
             if (wakeLock !== null && document.visibilityState === 'visible') {
                 wakeLock = await navigator.wakeLock.request('screen');
