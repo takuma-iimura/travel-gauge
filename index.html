@@ -93,12 +93,13 @@
     </div>
 
     <script>
-        // --- 設定：目的地（実家の座標に書き換えてください） ---
+        // --- 設定：目的地 ---
         const DEST = { lat: 36.42407437302163, lon: 136.6318145449978 }; 
         
         let totalDist = null;
-        let targetBearing = null; // 目的地の方位
-        let currentHeading = null; // 自分の向き
+        let targetBearing = null; 
+        let currentHeading = null; 
+        let isGpsActive = false; // GPS状態フラグ
 
         const elBar = document.getElementById('bar');
         const elDist = document.getElementById('distVal');
@@ -106,9 +107,7 @@
         const elDebug = document.getElementById('debug');
         const elUI = document.getElementById('ui');
 
-        // システム初期化
         async function initSystem() {
-            // iOSコンパス許可リクエスト
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const response = await DeviceOrientationEvent.requestPermission();
                 if (response !== 'granted') {
@@ -126,28 +125,46 @@
         function startTracking() {
             // 1. 位置情報の監視
             navigator.geolocation.watchPosition(pos => {
+                isGpsActive = true;
                 const lat = pos.coords.latitude;
                 const lon = pos.coords.longitude;
                 
                 const remain = calculateDistance(lat, lon, DEST.lat, DEST.lon);
-                if (totalDist === null) totalDist = remain;
+                if (totalDist === null) {
+                    totalDist = remain;
+                    if (totalDist === 0) totalDist = 0.001; // 0除算防止
+                }
 
-                // 目的地の方位角を更新
                 targetBearing = calculateBearing(lat, lon, DEST.lat, DEST.lon);
                 
-                // UI更新
                 const progress = Math.max(0, Math.min(100, ((totalDist - remain) / totalDist) * 100));
                 elBar.style.height = progress + '%';
                 elDist.textContent = remain.toFixed(1);
                 
                 checkBoost();
             }, err => {
-                elMsg.textContent = "GPS ERROR";
-            }, { enableHighAccuracy: true });
+                isGpsActive = false;
+                document.body.classList.remove('boosting');
+                
+                // エラーコードによる詳細表示
+                if (err.code === 1) {
+                    elMsg.textContent = "DENIED: 許可されていません";
+                } else if (err.code === 2) {
+                    elMsg.textContent = "SEARCHING GPS SIGNAL..."; // 室内など
+                } else if (err.code === 3) {
+                    elMsg.textContent = "GPS TIMEOUT...";
+                } else {
+                    elMsg.textContent = "GPS ERROR";
+                }
+                elDebug.textContent = `ERR CODE: ${err.code} / ${err.message}`;
+            }, { 
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            });
 
             // 2. 方位センサーの監視
             window.addEventListener('deviceorientation', e => {
-                // iOS用のwebkitCompassHeadingを優先、なければalphaから算出
                 let heading = e.webkitCompassHeading;
                 if (heading === undefined) {
                     heading = 360 - e.alpha;
@@ -157,18 +174,15 @@
             }, true);
         }
 
-        // ブースト判定ロジック
         function checkBoost() {
+            if (!isGpsActive) return; // GPS喪失時はブースト判定しない
             if (targetBearing === null || currentHeading === null) return;
 
-            // 角度の差分を計算（0-360度の環状を考慮）
             const diff = Math.abs(currentHeading - targetBearing);
             const normalizedDiff = Math.min(diff, 360 - diff);
 
-            // デバッグ情報の更新
             elDebug.textContent = `TARGET: ${Math.round(targetBearing)}° / CURRENT: ${Math.round(currentHeading)}° (DIFF: ${Math.round(normalizedDiff)}°)`;
 
-            // 25度以内ならブースト
             if (normalizedDiff < 25) {
                 document.body.classList.add('boosting');
                 elMsg.textContent = ">>> LOCK ON: BOOSTING <<<";
@@ -178,7 +192,6 @@
             }
         }
 
-        // 計算用：距離（Haversine）
         function calculateDistance(lat1, lon1, lat2, lon2) {
             const R = 6371;
             const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -187,7 +200,6 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         }
 
-        // 計算用：方位角（Bearing）
         function calculateBearing(lat1, lon1, lat2, lon2) {
             const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
             const Δλ = (lon2 - lon1) * Math.PI / 180;
