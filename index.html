@@ -29,9 +29,19 @@
 
         .container { width: 85%; max-width: 600px; text-align: center; z-index: 10; }
 
+        /* タイトル表示 */
+        #appTitle {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: var(--base-cyan);
+            margin-bottom: 1rem;
+            letter-spacing: 1px;
+            text-shadow: 0 0 10px rgba(0, 229, 255, 0.5);
+        }
+
         /* メインゲージ */
         .gauge-outer {
-            position: relative; width: 100%; height: 40vh;
+            position: relative; width: 100%; height: 35vh;
             background: var(--panel); border-radius: 30px;
             border: 1px solid var(--panel-border); overflow: hidden;
             box-shadow: inset 0 4px 20px rgba(0,0,0,0.8);
@@ -105,6 +115,8 @@
     </div>
 
     <div class="container" id="ui" style="display: none;">
+        <div id="appTitle">ゆな・かりなのおうちまで</div>
+
         <div class="gauge-outer">
             <div id="bar"></div>
         </div>
@@ -125,13 +137,17 @@
 
     <div id="configPanel">
         <div class="config-box">
-            <h2>TARGET COORDINATES</h2>
+            <h2>MISSION CONFIG</h2>
             <div class="input-group">
-                <label>LATITUDE (緯度)</label>
+                <label>DESTINATION NAME (表示タイトル)</label>
+                <input type="text" id="inTitle" placeholder="例：ゆな・かりなのおうちまで">
+            </div>
+            <div class="input-group">
+                <label>LATITUDE (目的地の緯度)</label>
                 <input type="number" id="inLat" step="any">
             </div>
             <div class="input-group">
-                <label>LONGITUDE (経度)</label>
+                <label>LONGITUDE (目的地の経度)</label>
                 <input type="number" id="inLon" step="any">
             </div>
             <div class="config-btns">
@@ -142,34 +158,45 @@
     </div>
 
     <script>
-        // デフォルトの目的地（初回起動時用）
-        let DEST = { lat: 36.42407437302163, lon: 136.6318145449978 }; 
+        // デフォルト設定
+        let CONFIG = {
+            title: "ゆな・かりなのおうちまで",
+            lat: 36.42407437302163,
+            lon: 136.6318145449978
+        }; 
         
         let totalDist = null;
         let targetBearing = null; 
         let currentHeading = null; 
         let isGpsActive = false;
+        let wakeLock = null; // スリープ防止用
 
         const elBar = document.getElementById('bar');
         const elDist = document.getElementById('distVal');
         const elMsg = document.getElementById('msg');
         const elDebug = document.getElementById('debug');
         const elUI = document.getElementById('ui');
+        const elTitle = document.getElementById('appTitle');
 
         // 起動時にローカルストレージから設定を読み込む
         window.onload = () => {
+            const savedTitle = localStorage.getItem('targetTitle');
             const savedLat = localStorage.getItem('targetLat');
             const savedLon = localStorage.getItem('targetLon');
-            if (savedLat !== null && savedLon !== null) {
-                DEST.lat = parseFloat(savedLat);
-                DEST.lon = parseFloat(savedLon);
-            }
+            
+            if (savedTitle !== null) CONFIG.title = savedTitle;
+            if (savedLat !== null) CONFIG.lat = parseFloat(savedLat);
+            if (savedLon !== null) CONFIG.lon = parseFloat(savedLon);
+
+            // 初期タイトル反映
+            elTitle.textContent = CONFIG.title;
         };
 
         // --- CONFIG UI制御 ---
         function openConfig() {
-            document.getElementById('inLat').value = DEST.lat;
-            document.getElementById('inLon').value = DEST.lon;
+            document.getElementById('inTitle').value = CONFIG.title;
+            document.getElementById('inLat').value = CONFIG.lat;
+            document.getElementById('inLon').value = CONFIG.lon;
             document.getElementById('configPanel').style.display = 'flex';
         }
 
@@ -178,28 +205,43 @@
         }
 
         function saveConfig() {
+            const title = document.getElementById('inTitle').value;
             const lat = parseFloat(document.getElementById('inLat').value);
             const lon = parseFloat(document.getElementById('inLon').value);
             
-            if (isNaN(lat) || isNaN(lon)) {
-                alert("数値を正しく入力してください。");
+            if (!title || isNaN(lat) || isNaN(lon)) {
+                alert("正しく入力してください。");
                 return;
             }
 
-            // 変数更新とローカルストレージ保存
-            DEST.lat = lat;
-            DEST.lon = lon;
+            // 更新と保存
+            CONFIG.title = title;
+            CONFIG.lat = lat;
+            CONFIG.lon = lon;
+            
+            localStorage.setItem('targetTitle', title);
             localStorage.setItem('targetLat', lat);
             localStorage.setItem('targetLon', lon);
             
-            // 基準距離をリセットして再計算させる
-            totalDist = null; 
+            elTitle.textContent = title;
+            totalDist = null; // 基準距離をリセットして再計算
             
             closeConfig();
         }
 
         // --- メインシステム ---
         async function initSystem() {
+            // スリープ防止機能の有効化
+            if ('wakeLock' in navigator) {
+                try {
+                    wakeLock = await navigator.wakeLock.request('screen');
+                    console.log('Wake Lock is active!');
+                } catch (err) {
+                    console.error(`${err.name}, ${err.message}`);
+                }
+            }
+
+            // コンパスの許可 (iOS対応)
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const response = await DeviceOrientationEvent.requestPermission();
                 if (response !== 'granted') {
@@ -220,13 +262,13 @@
                 const lat = pos.coords.latitude;
                 const lon = pos.coords.longitude;
                 
-                const remain = calculateDistance(lat, lon, DEST.lat, DEST.lon);
+                const remain = calculateDistance(lat, lon, CONFIG.lat, CONFIG.lon);
                 if (totalDist === null) {
                     totalDist = remain;
                     if (totalDist === 0) totalDist = 0.001; 
                 }
 
-                targetBearing = calculateBearing(lat, lon, DEST.lat, DEST.lon);
+                targetBearing = calculateBearing(lat, lon, CONFIG.lat, CONFIG.lon);
                 
                 const progress = Math.max(0, Math.min(100, ((totalDist - remain) / totalDist) * 100));
                 elBar.style.height = progress + '%';
@@ -236,13 +278,7 @@
             }, err => {
                 isGpsActive = false;
                 document.body.classList.remove('boosting');
-                
-                if (err.code === 1) elMsg.textContent = "DENIED: 許可されていません";
-                else if (err.code === 2) elMsg.textContent = "SEARCHING GPS SIGNAL..."; 
-                else if (err.code === 3) elMsg.textContent = "GPS TIMEOUT...";
-                else elMsg.textContent = "GPS ERROR";
-                
-                elDebug.textContent = `ERR CODE: ${err.code}`;
+                elMsg.textContent = "GPS ERROR: " + err.code;
             }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 
             window.addEventListener('deviceorientation', e => {
@@ -261,7 +297,6 @@
 
             elDebug.textContent = `TARGET: ${Math.round(targetBearing)}° / CURRENT: ${Math.round(currentHeading)}° (DIFF: ${Math.round(normalizedDiff)}°)`;
 
-            // 車内でのブレを考慮し、判定を甘めの35度に設定
             if (normalizedDiff < 35) {
                 document.body.classList.add('boosting');
                 elMsg.textContent = ">>> LOCK ON: BOOSTING <<<";
@@ -286,6 +321,13 @@
             const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
             return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
         }
+
+        // タブが切り替わった時にスリープ防止を再要求する
+        document.addEventListener('visibilitychange', async () => {
+            if (wakeLock !== null && document.visibilityState === 'visible') {
+                wakeLock = await navigator.wakeLock.request('screen');
+            }
+        });
     </script>
 </body>
 </html>
