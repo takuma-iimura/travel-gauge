@@ -12,6 +12,7 @@
             --boost-red: #ff0040;
             --text-main: #f8fafc;
             --panel: #11111a;
+            --panel-border: #222;
         }
 
         body {
@@ -24,18 +25,17 @@
             transition: background 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* ブースト時の背景：深みのある赤 */
         body.boosting { background-color: #1a0205; }
 
         .container { width: 85%; max-width: 600px; text-align: center; z-index: 10; }
 
         /* メインゲージ */
         .gauge-outer {
-            position: relative; width: 100%; height: 45vh;
+            position: relative; width: 100%; height: 40vh;
             background: var(--panel); border-radius: 30px;
-            border: 1px solid #222; overflow: hidden;
+            border: 1px solid var(--panel-border); overflow: hidden;
             box-shadow: inset 0 4px 20px rgba(0,0,0,0.8);
-            margin-bottom: 2rem;
+            margin-bottom: 1.5rem;
         }
 
         #bar {
@@ -54,30 +54,57 @@
         .distance-display { margin-bottom: 0.5rem; }
         .dist-val { font-size: 5rem; font-weight: 900; letter-spacing: -3px; line-height: 1; }
         .dist-unit { font-size: 1.5rem; color: #475569; margin-left: 5px; }
-
         body.boosting .dist-val { color: var(--boost-red); text-shadow: 0 0 25px var(--boost-red); }
 
         /* ステータス・デバッグ情報 */
         .status-box { height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
         #msg { font-size: 1.2rem; font-weight: bold; letter-spacing: 2px; color: #334155; }
-        #debug { font-size: 0.7rem; color: #222; margin-top: 5px; font-family: monospace; }
-
+        #debug { font-size: 0.7rem; color: #444; margin-top: 5px; font-family: monospace; }
         body.boosting #msg { color: var(--boost-red); }
         body.boosting #debug { color: #500; }
 
-        /* 開始ボタン */
-        #startBtn {
-            position: absolute; padding: 25px 50px; font-size: 1.5rem; font-weight: bold;
-            background: transparent; border: 2px solid var(--base-cyan); color: var(--base-cyan);
-            border-radius: 15px; cursor: pointer; backdrop-filter: blur(10px); z-index: 100;
+        /* UIボタン群 */
+        .btn-group { display: flex; gap: 10px; justify-content: center; margin-top: 10px; }
+        .btn {
+            padding: 15px 30px; font-size: 1.2rem; font-weight: bold;
+            background: transparent; border: 1px solid var(--base-cyan); color: var(--base-cyan);
+            border-radius: 10px; cursor: pointer; backdrop-filter: blur(10px);
         }
+        
+        /* 設定パネル（オーバーレイ） */
+        #configPanel {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(5, 5, 8, 0.95); backdrop-filter: blur(5px);
+            display: none; flex-direction: column; align-items: center; justify-content: center;
+            z-index: 200;
+        }
+        .config-box {
+            background: var(--panel); padding: 30px; border-radius: 15px;
+            border: 1px solid var(--base-cyan); width: 80%; max-width: 400px;
+        }
+        .config-box h2 { margin: 0 0 20px 0; font-size: 1.2rem; color: var(--base-cyan); letter-spacing: 2px; }
+        .input-group { margin-bottom: 15px; text-align: left; }
+        .input-group label { display: block; font-size: 0.8rem; color: #888; margin-bottom: 5px; }
+        .input-group input {
+            width: 100%; padding: 10px; font-size: 1rem;
+            background: #000; border: 1px solid #333; color: #fff;
+            border-radius: 5px; box-sizing: border-box;
+        }
+        .config-btns { display: flex; gap: 10px; margin-top: 20px; }
+        .config-btns button { flex: 1; padding: 12px; font-weight: bold; border-radius: 5px; cursor: pointer; }
+        .btn-save { background: var(--base-cyan); color: #000; border: none; }
+        .btn-cancel { background: transparent; color: #888; border: 1px solid #444; }
+
     </style>
 </head>
 <body>
 
-    <button id="startBtn" onclick="initSystem()">SYSTEM START</button>
+    <div class="btn-group" id="initBtns">
+        <button class="btn" onclick="initSystem()">SYSTEM START</button>
+        <button class="btn" onclick="openConfig()" style="border-color:#444; color:#888;">⚙</button>
+    </div>
 
-    <div class="container" id="ui" style="visibility: hidden;">
+    <div class="container" id="ui" style="display: none;">
         <div class="gauge-outer">
             <div id="bar"></div>
         </div>
@@ -90,16 +117,38 @@
             <div id="msg">SYSTEM INITIALIZING...</div>
             <div id="debug">Waiting for sensor data...</div>
         </div>
+        
+        <div class="btn-group">
+            <button class="btn" onclick="openConfig()" style="font-size: 0.9rem; padding: 10px 20px; border-color:#444; color:#888;">CONFIG</button>
+        </div>
+    </div>
+
+    <div id="configPanel">
+        <div class="config-box">
+            <h2>TARGET COORDINATES</h2>
+            <div class="input-group">
+                <label>LATITUDE (緯度)</label>
+                <input type="number" id="inLat" step="any">
+            </div>
+            <div class="input-group">
+                <label>LONGITUDE (経度)</label>
+                <input type="number" id="inLon" step="any">
+            </div>
+            <div class="config-btns">
+                <button class="btn-cancel" onclick="closeConfig()">CANCEL</button>
+                <button class="btn-save" onclick="saveConfig()">SAVE</button>
+            </div>
+        </div>
     </div>
 
     <script>
-        // --- 設定：目的地 ---
-        const DEST = { lat: 36.42407437302163, lon: 136.6318145449978 }; 
+        // デフォルトの目的地（初回起動時用）
+        let DEST = { lat: 36.42407437302163, lon: 136.6318145449978 }; 
         
         let totalDist = null;
         let targetBearing = null; 
         let currentHeading = null; 
-        let isGpsActive = false; // GPS状態フラグ
+        let isGpsActive = false;
 
         const elBar = document.getElementById('bar');
         const elDist = document.getElementById('distVal');
@@ -107,6 +156,49 @@
         const elDebug = document.getElementById('debug');
         const elUI = document.getElementById('ui');
 
+        // 起動時にローカルストレージから設定を読み込む
+        window.onload = () => {
+            const savedLat = localStorage.getItem('targetLat');
+            const savedLon = localStorage.getItem('targetLon');
+            if (savedLat !== null && savedLon !== null) {
+                DEST.lat = parseFloat(savedLat);
+                DEST.lon = parseFloat(savedLon);
+            }
+        };
+
+        // --- CONFIG UI制御 ---
+        function openConfig() {
+            document.getElementById('inLat').value = DEST.lat;
+            document.getElementById('inLon').value = DEST.lon;
+            document.getElementById('configPanel').style.display = 'flex';
+        }
+
+        function closeConfig() {
+            document.getElementById('configPanel').style.display = 'none';
+        }
+
+        function saveConfig() {
+            const lat = parseFloat(document.getElementById('inLat').value);
+            const lon = parseFloat(document.getElementById('inLon').value);
+            
+            if (isNaN(lat) || isNaN(lon)) {
+                alert("数値を正しく入力してください。");
+                return;
+            }
+
+            // 変数更新とローカルストレージ保存
+            DEST.lat = lat;
+            DEST.lon = lon;
+            localStorage.setItem('targetLat', lat);
+            localStorage.setItem('targetLon', lon);
+            
+            // 基準距離をリセットして再計算させる
+            totalDist = null; 
+            
+            closeConfig();
+        }
+
+        // --- メインシステム ---
         async function initSystem() {
             if (typeof DeviceOrientationEvent.requestPermission === 'function') {
                 const response = await DeviceOrientationEvent.requestPermission();
@@ -116,14 +208,13 @@
                 }
             }
             
-            document.getElementById('startBtn').style.display = 'none';
-            elUI.style.visibility = 'visible';
+            document.getElementById('initBtns').style.display = 'none';
+            elUI.style.display = 'block';
             
             startTracking();
         }
 
         function startTracking() {
-            // 1. 位置情報の監視
             navigator.geolocation.watchPosition(pos => {
                 isGpsActive = true;
                 const lat = pos.coords.latitude;
@@ -132,7 +223,7 @@
                 const remain = calculateDistance(lat, lon, DEST.lat, DEST.lon);
                 if (totalDist === null) {
                     totalDist = remain;
-                    if (totalDist === 0) totalDist = 0.001; // 0除算防止
+                    if (totalDist === 0) totalDist = 0.001; 
                 }
 
                 targetBearing = calculateBearing(lat, lon, DEST.lat, DEST.lon);
@@ -146,44 +237,32 @@
                 isGpsActive = false;
                 document.body.classList.remove('boosting');
                 
-                // エラーコードによる詳細表示
-                if (err.code === 1) {
-                    elMsg.textContent = "DENIED: 許可されていません";
-                } else if (err.code === 2) {
-                    elMsg.textContent = "SEARCHING GPS SIGNAL..."; // 室内など
-                } else if (err.code === 3) {
-                    elMsg.textContent = "GPS TIMEOUT...";
-                } else {
-                    elMsg.textContent = "GPS ERROR";
-                }
-                elDebug.textContent = `ERR CODE: ${err.code} / ${err.message}`;
-            }, { 
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            });
+                if (err.code === 1) elMsg.textContent = "DENIED: 許可されていません";
+                else if (err.code === 2) elMsg.textContent = "SEARCHING GPS SIGNAL..."; 
+                else if (err.code === 3) elMsg.textContent = "GPS TIMEOUT...";
+                else elMsg.textContent = "GPS ERROR";
+                
+                elDebug.textContent = `ERR CODE: ${err.code}`;
+            }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 });
 
-            // 2. 方位センサーの監視
             window.addEventListener('deviceorientation', e => {
                 let heading = e.webkitCompassHeading;
-                if (heading === undefined) {
-                    heading = 360 - e.alpha;
-                }
+                if (heading === undefined) heading = 360 - e.alpha;
                 currentHeading = heading;
                 checkBoost();
             }, true);
         }
 
         function checkBoost() {
-            if (!isGpsActive) return; // GPS喪失時はブースト判定しない
-            if (targetBearing === null || currentHeading === null) return;
+            if (!isGpsActive || targetBearing === null || currentHeading === null) return;
 
             const diff = Math.abs(currentHeading - targetBearing);
             const normalizedDiff = Math.min(diff, 360 - diff);
 
             elDebug.textContent = `TARGET: ${Math.round(targetBearing)}° / CURRENT: ${Math.round(currentHeading)}° (DIFF: ${Math.round(normalizedDiff)}°)`;
 
-            if (normalizedDiff < 25) {
+            // 車内でのブレを考慮し、判定を甘めの35度に設定
+            if (normalizedDiff < 35) {
                 document.body.classList.add('boosting');
                 elMsg.textContent = ">>> LOCK ON: BOOSTING <<<";
             } else {
