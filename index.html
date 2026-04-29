@@ -3,138 +3,197 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
     <title>Journey Booster</title>
     <style>
         :root {
-            --bg: #050507;
-            --base-cyan: #00d2ff;
-            --boost-red: #ff004c;
-            --text: #e2e8f0;
+            --bg: #050508;
+            --base-cyan: #00e5ff;
+            --boost-red: #ff0040;
+            --text-main: #f8fafc;
+            --panel: #11111a;
         }
+
         body {
-            margin: 0; background: var(--bg); color: var(--text);
-            font-family: 'Avenir', sans-serif;
+            margin: 0; padding: 0;
+            background-color: var(--bg);
+            color: var(--text-main);
+            font-family: 'Inter', -apple-system, sans-serif;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            height: 100vh; overflow: hidden; transition: background 0.3s;
+            height: 100vh; overflow: hidden;
+            transition: background 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         }
 
-        /* ブースト時の背景演出 */
-        body.boosting { background: #1a0005; }
+        /* ブースト時の背景：深みのある赤 */
+        body.boosting { background-color: #1a0205; }
 
-        .gauge-wrap {
-            position: relative; width: 80%; height: 50vh;
-            background: #111116; border-radius: 40px; overflow: hidden;
-            border: 2px solid #222;
+        .container { width: 85%; max-width: 600px; text-align: center; z-index: 10; }
+
+        /* メインゲージ */
+        .gauge-outer {
+            position: relative; width: 100%; height: 45vh;
+            background: var(--panel); border-radius: 30px;
+            border: 1px solid #222; overflow: hidden;
+            box-shadow: inset 0 4px 20px rgba(0,0,0,0.8);
+            margin-bottom: 2rem;
         }
 
         #bar {
             position: absolute; bottom: 0; width: 100%; height: 0%;
-            background: linear-gradient(0deg, #004e64, var(--base-cyan));
-            box-shadow: 0 0 30px var(--base-cyan);
-            transition: height 0.8s ease, background 0.3s;
+            background: linear-gradient(0deg, #006070, var(--base-cyan));
+            box-shadow: 0 0 40px var(--base-cyan);
+            transition: height 1s ease, background 0.3s;
         }
 
-        /* ブースト時のゲージ色 */
         body.boosting #bar {
-            background: linear-gradient(0deg, #66001d, var(--boost-red));
-            box-shadow: 0 0 50px var(--boost-red);
+            background: linear-gradient(0deg, #800020, var(--boost-red));
+            box-shadow: 0 0 60px var(--boost-red);
         }
 
-        .info { text-align: center; margin-top: 30px; }
-        .dist { font-size: 4rem; font-weight: 900; letter-spacing: -2px; transition: color 0.3s; }
-        body.boosting .dist { color: var(--boost-red); text-shadow: 0 0 20px var(--boost-red); }
+        /* 数値表示 */
+        .distance-display { margin-bottom: 0.5rem; }
+        .dist-val { font-size: 5rem; font-weight: 900; letter-spacing: -3px; line-height: 1; }
+        .dist-unit { font-size: 1.5rem; color: #475569; margin-left: 5px; }
 
-        .status-msg { font-size: 1rem; color: #444; margin-top: 10px; text-transform: uppercase; letter-spacing: 2px; }
-        body.boosting .status-msg { color: var(--boost-red); content: "BOOSTING"; }
+        body.boosting .dist-val { color: var(--boost-red); text-shadow: 0 0 25px var(--boost-red); }
 
+        /* ステータス・デバッグ情報 */
+        .status-box { height: 60px; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        #msg { font-size: 1.2rem; font-weight: bold; letter-spacing: 2px; color: #334155; }
+        #debug { font-size: 0.7rem; color: #222; margin-top: 5px; font-family: monospace; }
+
+        body.boosting #msg { color: var(--boost-red); }
+        body.boosting #debug { color: #500; }
+
+        /* 開始ボタン */
         #startBtn {
-            padding: 20px 40px; font-size: 1.2rem; background: none;
-            border: 1px solid var(--base-cyan); color: var(--base-cyan);
-            border-radius: 10px; cursor: pointer; z-index: 100;
+            position: absolute; padding: 25px 50px; font-size: 1.5rem; font-weight: bold;
+            background: transparent; border: 2px solid var(--base-cyan); color: var(--base-cyan);
+            border-radius: 15px; cursor: pointer; backdrop-filter: blur(10px); z-index: 100;
         }
     </style>
 </head>
 <body>
 
-    <button id="startBtn" onclick="requestPermissions()">SYSTEM START</button>
+    <button id="startBtn" onclick="initSystem()">SYSTEM START</button>
 
-    <div id="main-ui" style="display:none; width: 100%; display: flex; flex-direction: column; align-items: center;">
-        <div class="gauge-wrap">
+    <div class="container" id="ui" style="visibility: hidden;">
+        <div class="gauge-outer">
             <div id="bar"></div>
         </div>
-        <div class="info">
-            <div id="distText" class="dist">---.- km</div>
-            <div id="msg" class="status-msg">Searching target...</div>
+
+        <div class="distance-display">
+            <span id="distVal" class="dist-val">---.-</span><span class="dist-unit">km</span>
+        </div>
+
+        <div class="status-box">
+            <div id="msg">SYSTEM INITIALIZING...</div>
+            <div id="debug">Waiting for sensor data...</div>
         </div>
     </div>
 
     <script>
-        const DEST = { lat: 35.6812, lon: 139.7671 }; // 目的地の座標
+        // --- 設定：目的地（実家の座標に書き換えてください） ---
+        const DEST = { lat: 35.6812, lon: 139.7671 }; 
+        
         let totalDist = null;
+        let targetBearing = null; // 目的地の方位
+        let currentHeading = null; // 自分の向き
 
-        // 方位角（Bearing）を計算する関数
+        const elBar = document.getElementById('bar');
+        const elDist = document.getElementById('distVal');
+        const elMsg = document.getElementById('msg');
+        const elDebug = document.getElementById('debug');
+        const elUI = document.getElementById('ui');
+
+        // システム初期化
+        async function initSystem() {
+            // iOSコンパス許可リクエスト
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                const response = await DeviceOrientationEvent.requestPermission();
+                if (response !== 'granted') {
+                    alert("コンパスの使用を許可してください。");
+                    return;
+                }
+            }
+            
+            document.getElementById('startBtn').style.display = 'none';
+            elUI.style.visibility = 'visible';
+            
+            startTracking();
+        }
+
+        function startTracking() {
+            // 1. 位置情報の監視
+            navigator.geolocation.watchPosition(pos => {
+                const lat = pos.coords.latitude;
+                const lon = pos.coords.longitude;
+                
+                const remain = calculateDistance(lat, lon, DEST.lat, DEST.lon);
+                if (totalDist === null) totalDist = remain;
+
+                // 目的地の方位角を更新
+                targetBearing = calculateBearing(lat, lon, DEST.lat, DEST.lon);
+                
+                // UI更新
+                const progress = Math.max(0, Math.min(100, ((totalDist - remain) / totalDist) * 100));
+                elBar.style.height = progress + '%';
+                elDist.textContent = remain.toFixed(1);
+                
+                checkBoost();
+            }, err => {
+                elMsg.textContent = "GPS ERROR";
+            }, { enableHighAccuracy: true });
+
+            // 2. 方位センサーの監視
+            window.addEventListener('deviceorientation', e => {
+                // iOS用のwebkitCompassHeadingを優先、なければalphaから算出
+                let heading = e.webkitCompassHeading;
+                if (heading === undefined) {
+                    heading = 360 - e.alpha;
+                }
+                currentHeading = heading;
+                checkBoost();
+            }, true);
+        }
+
+        // ブースト判定ロジック
+        function checkBoost() {
+            if (targetBearing === null || currentHeading === null) return;
+
+            // 角度の差分を計算（0-360度の環状を考慮）
+            const diff = Math.abs(currentHeading - targetBearing);
+            const normalizedDiff = Math.min(diff, 360 - diff);
+
+            // デバッグ情報の更新
+            elDebug.textContent = `TARGET: ${Math.round(targetBearing)}° / CURRENT: ${Math.round(currentHeading)}° (DIFF: ${Math.round(normalizedDiff)}°)`;
+
+            // 25度以内ならブースト
+            if (normalizedDiff < 25) {
+                document.body.classList.add('boosting');
+                elMsg.textContent = ">>> LOCK ON: BOOSTING <<<";
+            } else {
+                document.body.classList.remove('boosting');
+                elMsg.textContent = "TARGETING...";
+            }
+        }
+
+        // 計算用：距離（Haversine）
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        // 計算用：方位角（Bearing）
         function calculateBearing(lat1, lon1, lat2, lon2) {
             const φ1 = lat1 * Math.PI / 180, φ2 = lat2 * Math.PI / 180;
             const Δλ = (lon2 - lon1) * Math.PI / 180;
             const y = Math.sin(Δλ) * Math.cos(φ2);
             const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
             return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-        }
-
-        async function requestPermissions() {
-            // iOSのコンパス許可
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                const permission = await DeviceOrientationEvent.requestPermission();
-                if (permission !== 'granted') return alert("センサーを許可してください");
-            }
-
-            document.getElementById('startBtn').style.display = 'none';
-            document.getElementById('main-ui').style.display = 'flex';
-
-            startTracking();
-        }
-
-        function startTracking() {
-            let currentBearing = 0;
-
-            // GPS追跡
-            navigator.geolocation.watchPosition(pos => {
-                const lat = pos.coords.latitude;
-                const lon = pos.coords.longitude;
-                const remain = getDistance(lat, lon, DEST.lat, DEST.lon);
-                if (totalDist === null) totalDist = remain;
-
-                currentBearing = calculateBearing(lat, lon, DEST.lat, DEST.lon);
-                
-                const progress = Math.max(0, Math.min(100, ((totalDist - remain) / totalDist) * 100));
-                document.getElementById('bar').style.height = progress + '%';
-                document.getElementById('distText').textContent = remain.toFixed(1) + " km";
-            }, null, { enableHighAccuracy: true });
-
-            // コンパス追跡
-            window.addEventListener('deviceorientationabsolute', e => {
-                let heading = e.webkitCompassHeading || e.alpha;
-                if (heading === undefined) return;
-
-                // 目的地の方角とデバイスの向きの差を計算
-                const diff = Math.abs(heading - currentBearing);
-                const isTargeting = diff < 20 || diff > 340; // 誤差20度以内
-
-                if (isTargeting) {
-                    document.body.classList.add('boosting');
-                    document.getElementById('msg').textContent = ">>> LOCK ON: BOOSTING <<<";
-                } else {
-                    document.body.classList.remove('boosting');
-                    document.getElementById('msg').textContent = "Targeting...";
-                }
-            }, true);
-        }
-
-        function getDistance(lat1, lon1, lat2, lon2) {
-            const R = 6371;
-            const dLat = (lat2-lat1) * Math.PI/180, dLon = (lon2-lon1) * Math.PI/180;
-            const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
-            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
     </script>
 </body>
